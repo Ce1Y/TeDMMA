@@ -41,7 +41,7 @@ chat_generator = OpenAIChatGenerator(
 
 def load_and_index_data(document_store: ElasticsearchDocumentStore, embedder):
     es_docs = []
-    embedder.warm_up()  # 必須先 warm_up 載入模型
+    embedder.warm_up()
     
     
     

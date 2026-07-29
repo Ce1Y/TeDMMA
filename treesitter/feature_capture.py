@@ -20,23 +20,18 @@ def classify_java_file(matches, source_code):
             for node in captures['class.type']:
                 annotations.add(get_text(node))
 
-    # 1. Web 層級判斷
     if any(a in annotations for a in ["RestController", "Controller"]):
         return "CONTROLLER"
     
-    # 2. 業務邏輯層級判斷
     if "Service" in annotations:
         return "SERVICE"
     
-    # 3. 持久層判斷 (優先於 DTO，因為 Entity 常掛 Lombok 註解)
     if any(a in annotations for a in ["Entity", "Table", "Document", "Id", "MappedSuperclass"]):
         return "ENTITY"
     
-    # 4. 倉儲層判斷
     if any(a in annotations for a in ["Repository"]):
         return "REPOSITORY"
 
-    # 5. DTO 判斷 (Data Transfer Object / Value Object)
     dto_indicators = {
         "Data", "Value", "Builder", 
         "NoArgsConstructor", "AllArgsConstructor", 
@@ -46,9 +41,8 @@ def classify_java_file(matches, source_code):
     if any(a in annotations for a in dto_indicators):
         return "DTO"
     
-    # 6. 通用元件判斷 (放在較後方，避免過早攔截)
     if "Component" in annotations:
-        return "REPOSITORY" # 或根據你的需求歸類為 COMPONENT
+        return "REPOSITORY"
     
     return "UNKNOWN"
 
@@ -100,7 +94,6 @@ def extract_features(item: tuple):
         return extract_repository_features(code_content)
         
     else:
-        # 其他一般的 POJO 或 Utility 類別
         # print("Classified as UNKNOWN")
         return extract_class_features(code_content)
 
@@ -228,42 +221,6 @@ def extract_entity_features(code_content: str):
     tree = parser.parse(code_bytes)
     root_node = tree.root_node
     
-    # print(prettify_sexp(str(root_node)))
-    # query = Query(
-    #     JAVA_LANGUAGE,
-    #     """
-    #     (class_declaration
-    #         name: (identifier) @entity.name
-    #         body: (class_body
-    #             [
-    #                 (field_declaration
-    #                     (modifiers
-    #                         [
-    #                             (marker_annotation name: (identifier) @field.annotation)
-    #                             (annotation name: (identifier) @field.annotation)
-    #                         ]
-    #                     )*
-    #                     type: [
-    #                         (type_identifier) @field.type
-    #                         (generic_type) @field.type
-    #                     ]
-    #                     declarator: (variable_declarator
-    #                     name: (identifier) @field.name)
-    #                 ) @entity.field
-
-    #                 (enum_declaration
-    #                     name: (identifier) @enum.name
-    #                     body: (enum_body
-    #                         (enum_constant name: (identifier) @enum.member)*
-    #                     )
-    #                 ) @entity.enum
-    #             ]
-    #         )
-    #     )
-    #     """
-    # )
-    
-    # === test qeury ===
     query = Query(
         JAVA_LANGUAGE,
         """

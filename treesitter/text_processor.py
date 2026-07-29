@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 class MethodSignature(BaseModel):
     name: str
-    method_path: Optional[str] = None  # 新增此欄位來儲存 path
+    method_path: Optional[str] = None  
     params: List[str]
     return_type: str
 
@@ -41,8 +41,8 @@ class RepoMethod(BaseModel):
 
 class RepositoryFeature(BaseModel):
     repo_name: str
-    managed_entity: str  # 關鍵：管理的實體類別
-    id_type: str         # 主鍵型別
+    managed_entity: str  
+    id_type: str         
     methods: List[RepoMethod] = []
 
 
@@ -56,7 +56,6 @@ def fast_regex_classify(file_path: str, content: str):
     if file_path.endswith("Repository.java") or file_path.endswith("Dao.java"): return "REPOSITORY"
     if file_path.endswith(("Dto.java", "DTO.java", "Request.java", "Response.java", "VO.java")): return "DTO"
     
-    # 2. 判斷內容關鍵字 (Regex)
     patterns = {
         "TEST": r"@Test|@ParameterizedTest|@SpringBootTest",
         "CONTROLLER": r"@(Rest)?Controller",
@@ -72,7 +71,6 @@ def fast_regex_classify(file_path: str, content: str):
     def has_annotation(pattern):
         return re.search(pattern, content)
         
-    # 判斷順序很重要（由明確到模糊）
     if has_annotation(r"@Test|@ParameterizedTest|@SpringBootTest"):
         return "TEST"
 
@@ -210,48 +208,11 @@ def process_path_features(matches, source_code):
 
 
 def process_entity_features(matches: List[tuple], source_code: bytes) -> EntityFeature:
-    # entity_info = {
-    #     "entity_name": None,
-    #     "component_type": "Entity",
-    #     "fields": [],
-    #     "annotations": [] # 若有 class-level 標記可在此擴充
-    # }
-
-    # def get_text(node):
-    #     if node is None: return None
-    #     return source_code[node.start_byte:node.end_byte].decode('utf-8')
-
-    # entity_name_set = False
-
-    # for pattern_id, capture in matches:
-    #     entity_node = capture.get('entity.name', [None])[0]
-    #     if not entity_node:
-    #         continue
-
-    #     entity_name = get_text(entity_node)
-
-    #     if not entity_name_set:
-    #         entity_info["entity_name"] = entity_name
-    #         entity_name_set = True
-
-    #     field_name_node = capture.get('field.name', [None])[0]
-    #     field_type_node = capture.get('field.type', [None])[0]
-    #     field_anno_node = capture.get('field.annotation', [None])[0]
-
-    #     if field_name_node:
-    #         field_data = {
-    #             "name": get_text(field_name_node),
-    #             "type": get_text(field_type_node),
-    #             "annotation": f"@{get_text(field_anno_node)}" if field_anno_node else None
-    #         }
-    #         entity_info["fields"].append(field_data)
-
-    # === test post-processing ===
     entity_info = {
         "entity_name": None,
         "component_type": "Entity",
-        "superclass": None,      # 新增：儲存父類別
-        "annotations": [],       # 新增：儲存類別層級註解
+        "superclass": None,      
+        "annotations": [],       
         "fields": []
     }
 
@@ -259,12 +220,10 @@ def process_entity_features(matches: List[tuple], source_code: bytes) -> EntityF
         if node is None: return None
         return source_code[node.start_byte:node.end_byte].decode('utf-8')
 
-    # 用於對欄位進行去重與聚合的字典，Key 使用欄位節點的唯一範圍 (start_byte, end_byte)
     fields_dict = {}
     class_annotations_set = set()
 
     for pattern_id, capture in matches:
-        # 1. 處理類別名稱與父類別（僅需處理一次）
         if not entity_info["entity_name"]:
             entity_node = capture.get('entity.name', [None])[0]
             if entity_node:
@@ -274,19 +233,16 @@ def process_entity_features(matches: List[tuple], source_code: bytes) -> EntityF
             if superclass_node:
                 entity_info["superclass"] = get_text(superclass_node)
 
-        # 2. 收集類別層級註解 (將陣列中所有的註解都拿出來並去重)
         entity_anno_nodes = capture.get('entity.annotation', [])
         for anno_node in entity_anno_nodes:
             anno_text = get_text(anno_node)
             if anno_text:
                 class_annotations_set.add(f"@{anno_text}")
 
-        # 3. 處理欄位層級資訊
         field_node = capture.get('entity.field', [None])[0]
         if field_node:
-            field_key = (field_node.start_byte, field_node.end_byte) # 欄位的唯一識別元
+            field_key = (field_node.start_byte, field_node.end_byte)
             
-            # 如果這個欄位還沒被建立過，先初始化
             if field_key not in fields_dict:
                 field_name_node = capture.get('field.name', [None])[0]
                 field_type_node = capture.get('field.type', [None])[0]
@@ -294,17 +250,15 @@ def process_entity_features(matches: List[tuple], source_code: bytes) -> EntityF
                 fields_dict[field_key] = {
                     "name": get_text(field_name_node),
                     "type": get_text(field_type_node),
-                    "annotations": [] # 改為陣列，容納多個註解
+                    "annotations": []
                 }
             
-            # 聚合該欄位在這次 match 中包含的所有註解
             field_anno_nodes = capture.get('field.annotation', [])
             for anno_node in field_anno_nodes:
                 anno_text = get_text(anno_node)
                 if anno_text and f"@{anno_text}" not in fields_dict[field_key]["annotations"]:
                     fields_dict[field_key]["annotations"].append(f"@{anno_text}")
 
-    # 4. 將收集好的集合與字典轉回最終的 output 格式
     entity_info["annotations"] = list(class_annotations_set)
     entity_info["fields"] = list(fields_dict.values())
 
@@ -357,10 +311,8 @@ def process_dto_features(matches: List[tuple], source_code: bytes):
             if 'field.default_value' in captures:
                 dto_info["fields"][field_id]["default_value"] = get_text(captures['field.default_value'][0])
 
-    # 轉換 fields：移除 start_byte key
     dto_info["fields"] = list(dto_info["fields"].values())
 
-    # set 轉 list（避免不可序列化）
     dto_info["annotations"] = list(dto_info["annotations"])
     for f in dto_info["fields"]:
         f["annotations"] = list(f["annotations"])
@@ -384,22 +336,19 @@ def process_repository_features(matches, source_code):
     }
 
     for _, captures in matches:
-        # 1. 處理 Repository 基本定義
         if 'repo.name' in captures:
             repo_data['repo_name'] = get_text(captures['repo.name'][0])
             repo_data['base_interface'] = get_text(captures.get('repo.base_interface', [None])[0])
             repo_data['managed_entity'] = get_text(captures.get('repo.managed_entity', [None])[0])
             repo_data['id_type'] = get_text(captures.get('repo.id_type', [None])[0])
 
-        # 2. 處理 Repository 內定義的方法 (Query Methods)
         if 'repo.method' in captures:
             method_info = {
                 'name': get_text(captures.get('method.name', [None])[0]),
                 'return_type': get_text(captures.get('method.return_type', [None])[0]),
                 'params': get_text(captures.get('method.params', [None])[0]),
-                'annotations': [] # 如果 Query 有擷取 @Query 標註可放這
+                'annotations': []
             }
-            # 濾除空值並加入列表
             if method_info['name']:
                 repo_data['methods'].append(method_info)
 
