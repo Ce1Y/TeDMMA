@@ -64,24 +64,23 @@ async def main():
         f.write(prompt_test_cases)
     print(">>> Test case extracted.")
         
-    # LLM analysis output
-    # analysis_response = atg.analyze_ast_features(prompt_features)
-    # with open(f"./llm_analysis_result/{TARGET_ZIP_FILE}_analysis_response.txt", "w", encoding="utf-8") as f:
-    #     f.write(analysis_response)
-    with open(f"./llm_analysis_result/{TARGET_ZIP_FILE}_analysis_response.txt", "r", encoding="utf-8") as f:
-        analysis_response = f.read()
-    print(">>> AST analysis_response extracted.\n\n.")
-    
-    ### testing ###
-    # analysis_pure_text = atg.analyze_pure_test(pure_text)
-    # print(">>> Pure text analysis_response extracted.\n\n.")
-    
+    # Expected microservice endpoints
     with open(f"./expected_microservice_endpoint/{TARGET_ZIP_FILE}_expected_microservice_endpoints.yaml", "r", encoding="utf-8") as f:
         expected_endpoint = yaml.safe_load(f)
-    
+    print(">>> Expected microservice endpoints loaded.\n\n.")
+        
+    # LoGMIMT LLM analysis output
+    analysis_response = atg.analyze_ast_features(prompt_features)
+    with open(f"./llm_analysis_result/{TARGET_ZIP_FILE}_analysis_response.txt", "w", encoding="utf-8") as f:
+        f.write(analysis_response)
+    print(">>> AST analysis_response extracted.\n\n.")
     atg.generate_api_test(analysis_response, prompt_test_cases, expected_endpoint)
     
-    
+    ### LLM baseline output ###
+    # analysis_pure_text = atg.analyze_pure_test(pure_text)
+    # with open(f"./{TARGET_ZIP_FILE}_pure_text_analysis.txt", "w", encoding="utf-8") as f:
+    #     f.write(analysis_pure_text)
+    # print(">>> Pure text analysis_response extracted.\n\n.")
     # atg.generate_api_test(analysis_pure_text, prompt_test_cases, expected_endpoint)
 
 

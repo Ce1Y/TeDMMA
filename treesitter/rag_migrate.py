@@ -128,12 +128,28 @@ def generate_test_case_by_BM25():
         yaml_content = f.read()
     with open(f"./llm_analysis_result/{MIGRATE_PROJECT_NAME}_analysis_response.txt", "r", encoding="utf-8") as f:
         analysis_content = f.read()
-
-    feature_contents = ""
-    for f in Path(f"./karate_feature/{MIGRATE_PROJECT_NAME}").glob("*.feature"):
-        feature_contents += f"\n=== {f.name} ===\n{open(f, 'r', encoding='utf-8').read()}"
     with open(f"./monolith_test_case_codes/{MIGRATE_PROJECT_NAME}_test_cases.txt", "r", encoding="utf-8") as f:
         test_cases = f.read()
+        
+    # === Test: Whether monolithic features effect the result === #
+    with open(f"./monolith_features/{MIGRATE_PROJECT_NAME}_features.txt", "r", encoding="utf-8") as f:
+        monolith_features = f.read()
+
+    karate_contents = ""
+    
+    # === LoGMIMT Karate === #
+    for f in Path(f"./karate_feature/{MIGRATE_PROJECT_NAME}").glob("*.feature"):
+        karate_contents += f"\n=== {f.name} ===\n{open(f, 'r', encoding='utf-8').read()}"
+        
+    for f in Path(f"./pact_contract/{MIGRATE_PROJECT_NAME}/").rglob("*.feature"):
+        karate_contents += f"\n=== {f.name} ===\n{open(f, 'r', encoding='utf-8').read()}"
+        
+    # === LLM baseline karate === #
+    # for f in Path(f"./llm_baseline_karate/{MIGRATE_PROJECT_NAME}").glob("*.feature"):
+    #     karate_contents += f"\n=== {f.name} ===\n{open(f, 'r', encoding='utf-8').read()}"
+        
+        
+    
     
     # 建立一個靜態 Pipeline，專門用來直接吐出這三個 Input
     static_input_pipeline = Pipeline()
@@ -148,10 +164,13 @@ def generate_test_case_by_BM25():
         {analysis_content}
         
         3. Existing Karate feature files:
-        {feature_contents}
+        {karate_contents}
         
         4. Legacy system's test case:
         {test_cases}
+        
+        5. LLM monolithic system features:
+        {monolith_features}
         """)
     )
 
@@ -159,7 +178,7 @@ def generate_test_case_by_BM25():
         pipeline=static_input_pipeline,
         name="get_migration_inputs_tool",
         description="【必用工具】在開始生成任何測試腳本前，必須先調用此工具來取得預期端點(YAML)、舊系統分析、以及現有 Karate 檔案內容作為基礎依賴。",
-        input_mapping={}, # 不需要任何輸入參數
+        input_mapping={},
         output_mapping={"builder.prompt": "retrieval_output"}
     )
     
@@ -169,25 +188,71 @@ def generate_test_case_by_BM25():
     conversational_rag_agent.add_component(
         "agent",
         Agent(
+            # system_prompt="""
+            # You are a senior microservices migration expert. Your task is to generate new test scripts based on the user-provided "next service to migrate".
+            
+            # You have two tools at your disposal:
+            # 1. `get_migration_inputs_tool`: Use this to retrieve the critical background metadata, including expected microservice endpoints (YAML), legacy system analysis, existing Karate features, and legacy test cases.
+            # 2. `search_test_examples_tool`: Use this to search and retrieve Karate DSL specifications, Pact JSON templates, or success/failure contract comparison examples via BM25 and Vector hybrid search.
+            
+            # Please strictly follow these guidelines:
+            # 1. INITIAL ACTION: Before generating any test scripts or analyzing the service, you MUST first call `get_migration_inputs_tool` to fetch the baseline migration metadata and dependencies.
+            # 2. Generate Karate DSL (Feature file) that conforms to specifications.
+            # 3. Generate corresponding Pact JSON (contract tests).
+            #     - Every interaction MUST include a providerState.
+            #     - Consumer and Provider MUST represent actual microservice names retrieved from the architecture features.
+            #     - If the target service has no inter-service invocation relationship, DO NOT generate Pact JSON (ONLY generate Karate DSL).
+            # 4. Maintain styling consistency with the examples found in the tools.
+            
+            # CRITICAL CONSTRAINT:
+            # - DO NOT generate any conversational text, introductions, conclusions, or explanations. 
+            # - ONLY output the raw Karate DSL and Pact JSON. Any other text is strictly forbidden.
+            # """,
             system_prompt="""
             You are a senior microservices migration expert. Your task is to generate new test scripts based on the user-provided "next service to migrate".
             
             You have two tools at your disposal:
-            1. `get_migration_inputs_tool`: Use this to retrieve the critical background metadata, including expected microservice endpoints (YAML), legacy system analysis, existing Karate features, and legacy test cases.
+            1. `get_migration_inputs_tool`: Use this to retrieve critical background metadata, including expected microservice endpoints (YAML), legacy system analysis, existing Karate features, and legacy test cases.
             2. `search_test_examples_tool`: Use this to search and retrieve Karate DSL specifications, Pact JSON templates, or success/failure contract comparison examples via BM25 and Vector hybrid search.
             
             Please strictly follow these guidelines:
             1. INITIAL ACTION: Before generating any test scripts or analyzing the service, you MUST first call `get_migration_inputs_tool` to fetch the baseline migration metadata and dependencies.
-            2. Generate Karate DSL (Feature file) that conforms to specifications.
-            3. Generate corresponding Pact JSON (contract tests).
-                - Every interaction MUST include a providerState.
-                - Consumer and Provider MUST represent actual microservice names retrieved from the architecture features.
-                - If the target service has no inter-service invocation relationship, DO NOT generate Pact JSON (ONLY generate Karate DSL).
-            4. Maintain styling consistency with the examples found in the tools.
+            2. MANDATORY SEARCH ACTION: Before writing Pact JSON, you MUST call `search_test_examples_tool` with query "pact v3 pass example" to retrieve valid Pact Specification V3 JSON templates.
+            
+            3. Generate Karate DSL (Feature file):
+               - Conforms to Karate BDD specifications.
+               - OK to use Karate fuzzy matchers like `#number`, `#string`, `#boolean` in Karate feature files ONLY.
+
+            4. Generate corresponding Pact JSON (Contract tests) adhering strictly to Pact Specification V3:
+               - PACT V3 SPECIFICATION MANDATE:
+                    * Must use V3 structure: Top-level `metadata` MUST specify `pactSpecification.version: "3.0.0"`.
+                    * MANDATORY PROVIDER STATES: Every interaction MUST contain a V3 `providerStates` array (e.g., `"providerStates": [{"name": "A visit with ID 1 exists"}]`). DO NOT use legacy V2 string `providerState` or omit it.
+                    * CORRECT SERVICE ROLES & PATH ALIGNMENT: 
+                    - The target "next service to migrate" MUST be set as the `provider` in all generated Pact contracts.
+                    - The `consumer` MUST be selected from existing microservices that have ALREADY been migrated. Determine which services are already migrated by checking:
+                        1) Existing Karate features
+                        2) Existing Pact contracts
+                    - Check the existed Karate DSL and Pact JSON by using 'get_migration_inputs_tool' to retrieve the current state of migrated services.
+                    - The requested path in interactions MUST belong to the Provider service! (e.g., if the service to migrate is `visit-service`, the `provider` MUST be `visit-service`, and the `consumer` is an already-migrated calling service like `api-gateway` or `pet-service`).
+                    * MANDATORY DYNAMIC MATCHING RULES: For dynamic field values (like auto-generated IDs, timestamps, or UUIDs), you MUST include a `matchingRules` block using standard JSONPath notation (e.g., `"$.body.id": {"matchers": [{"match": "type"}]}`).
+                    * Include negative scenarios (e.g., 400 Bad Request, 404 Not Found) in interactions if present in the corresponding Karate test cases.
+               
+               - PACT SYNTAX ISOLATION: 
+                 * DO NOT EVER use Karate matchers (such as `#number`, `#string`, `#array`, `#boolean`, etc.) inside any Pact JSON file!
+                 * Response bodies MUST contain realistic concrete sample values.
+
+               - CONTRACT FILE SEPARATION (CRITICAL):
+                 * NEVER merge multiple inter-service contracts into a single Pact JSON file or array!
+                 * Generate ONE SEPARATE Pact JSON code block for EACH Consumer-Provider pair (e.g., File 1: `api-gateway` -> `visit-service`).
+                 * Add a comment header before each code block indicating its target pair or file path (e.g., `# Pact: api-gateway-visit-service.json`).
+
+               - If the target service has no inter-service invocation relationship, DO NOT generate Pact JSON (ONLY generate Karate DSL).
+
+            5. Maintain styling consistency with the passing examples retrieved from `search_test_examples_tool`.
             
             CRITICAL CONSTRAINT:
             - DO NOT generate any conversational text, introductions, conclusions, or explanations. 
-            - ONLY output the raw Karate DSL and Pact JSON. Any other text is strictly forbidden.
+            - ONLY output the raw Karate DSL and Pact JSON enclosed in markdown code blocks (` ```gherkin ` and ` ```json `). Any other text is strictly forbidden.
             """,
             chat_generator=chat_generator,
             tools=[es_tool, static_input_tool],
@@ -219,7 +284,5 @@ def generate_test_case_by_BM25():
                 "message_writer": {"chat_history_id": chat_history_id},
             }
         )
-        
-        
         
 generate_test_case_by_BM25()
